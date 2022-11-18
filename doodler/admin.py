@@ -1,3 +1,8 @@
 from django.contrib import admin
 
-# Register your models here.
+from doodler.models import Doodle
+
+
+@admin.register(Doodle)
+class DoodleAdmin(admin.ModelAdmin):
+    list_display = ("name",)

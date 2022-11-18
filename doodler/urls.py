@@ -16,6 +16,12 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path
 
+from doodler.views import HomeView, AnswerView, OwnerView, ThanksView
+
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("", HomeView.as_view(), name="home"),
+    path("<uuid:doodle>", AnswerView.as_view(), name="answer"),
+    path("owner/<uuid:doodle>", OwnerView.as_view(), name="owner"),
+    path("thanks/<uuid:doodle>", ThanksView.as_view(), name="thanks"),
 ]

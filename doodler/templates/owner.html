@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Owner view for {{doodle.name}}</h2>
+
+<p>
+Answer the doodle at: <a href="{% url 'answer' doodle=doodle.id %}">
+	{{request.get_host }}{% url "answer" doodle=doodle.id %}</a>
+<br>
+Own the doodle at: <a href="{{ doodle.owner_link }}">
+	{{request.get_host }}{{ doodle.owner_link }}
+</a>
+</p>
+
+<h3>Answers</h3>
+
+<table>
+	<thead>
+		<tr>
+			<th>Name</th>
+			{%for choice in choices%}
+			<th>{{ choice.name }}</th>
+			{% endfor %}
+		</tr>
+	</thead>
+	<tbody>
+		{% for answer in answers %}
+		<tr>
+			<td>{{ answer.name }}</td>
+			{% for a in answer.choices %}
+			{% if a %}
+			<td>
+				<input style="background: green" type="checkbox" disabled checked />
+			</td>
+			{% else %}
+			<td>
+				<input style="background: red" type="checkbox" disabled />
+			</td>
+			{% endif %}
+			{% endfor %}
+		</tr>
+		{% endfor %}
+		<tr>
+			<td><i>Total</i></td>
+			{%for choice in choices%}
+			{% if choice.is_max %}
+			<td style="font-weight: 600">{{ choice.count }}</td>
+			{% else %}
+			<td>{{ choice.count }}</td>
+			{% endif %}
+			{% endfor %}
+		</tr>
+	</tbody>
+</table>
+
+{% endblock %}

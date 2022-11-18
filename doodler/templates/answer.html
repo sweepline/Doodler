@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h3>{{doodle.name}}</h3>
+<form method="post"> {% csrf_token %}
+	{{ form.as_p }}
+	<label>Choices:</label>
+	{%for choice in choices%}
+	<div>
+		<label>
+			<input type="checkbox" name="{{choice.key}}">
+			{{choice.name}}
+		</label>
+	</div>
+	{%endfor%}
+	<br />
+	<input type="submit" value="Submit Response" />
+</form>
+{% endblock %}

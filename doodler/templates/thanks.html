@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>
+	Thanks for answering {{doodle.name}}
+</h1>
+
+Return to the homepage at: <a href="{% url 'home' %}">
+	{{request.get_host }}{% url "home" %}</a>
+<br>
+Answer again at: <a href="{% url 'answer' doodle=doodle.id %}">
+	{{request.get_host }}{% url "answer" doodle=doodle.id %}
+</a>
+{% endblock %}
