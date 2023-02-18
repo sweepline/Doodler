@@ -1,0 +1,200 @@
+#!/usr/bin/env python3
+
+# SPDX-License-Identifier: MIT
+# From https://github.com/Mortal/shiftplanner
+
+r"""
+Easy deployment to PythonAnywhere.
+
+First you need to enable API access in your account by going to
+"Account" in PythonAnywhere and going to the tab "API Token".
+
+Then you should add the following to the .bashrc on the PythonAnywhere server:
+
+    alias P='cd ~/*/.git/.. && git pull'
+    alias S='cd ~/*/.git/.. && .venv/bin/python manage.py collectstatic --no-input'
+    alias M='cd ~/*/.git/.. && .venv/bin/python manage.py migrate'
+    alias R='curl --header "Authorization: Token $API_TOKEN" https://eu.pythonanywhere.com/api/v0/user/$USER/webapps/$USER.eu.pythonanywhere.com/reload/ -XPOST'
+
+Then, you should create an env.txt file in this checkout with contents
+that you can obtain by running the following in a PythonAnywhere shell:
+
+    echo -e "PA_API_TOKEN=$API_TOKEN\nPA_USER=$USER"
+
+(that is, env.txt should specify PA_API_TOKEN and PA_USER.)
+
+To actually deploy an update to PythonAnywhere, run:
+
+    ./deploy PR
+
+...which will access the PythonAnywhere shell and type P && R,
+which will [P]ULL the newest code from Git and [R]ELOAD the webapp.
+
+If you also need to update [S]TATIC files and run [M]IGRATE
+you can run
+
+    ./deploy PSMR
+
+...which will access the PythonAnywhere shell and type P && S && M && R
+to execute all the aliases specified in the .bashrc.
+"""
+
+import argparse
+import json
+import os
+import random
+import re
+import string
+import time
+import urllib.parse
+import urllib.request
+import webbrowser
+from typing import List, Optional
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--eval", action="store_true")
+parser.add_argument("actions")
+parser.add_argument("instance", nargs="?")
+
+
+def parse_actions(s: str) -> str:
+    actions: List[str] = []
+    i = 0
+    if i < len(s) and s[i] == "P":
+        actions.append("P")
+        i += 1
+    else:
+        raise SystemExit("First action must be P (pull)")
+    if i < len(s) and s[i] == "S":
+        actions.append("S")
+        i += 1
+    if i < len(s) and s[i] == "M":
+        actions.append("M")
+        i += 1
+    if i == len(s):
+        raise SystemExit("Last action must be R (reload)")
+    elif s[i] != "R":
+        raise SystemExit("Unexpected action %r. Syntax: 'P' ['S'] ['M'] 'R'" % s[i])
+    actions.append("R")
+    return " && ".join(actions)
+
+
+def main() -> None:
+    if not os.path.exists("env.txt"):
+        raise SystemExit(
+            "Please open a PythonAnywhere console and type\n\t"
+            + r'echo -e "PA_API_TOKEN=$API_TOKEN\nPA_USER=$USER"'
+            + "\nand paste the result into env.txt in this checkout."
+        )
+
+    args = parser.parse_args()
+    if args.eval:
+        actions = args.actions
+    else:
+        actions = parse_actions(args.actions)
+
+    env = {**os.environ}
+    with open("env.txt") as fp:
+        for line in fp:
+            if "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            env[k.strip()] = v.strip()
+    suf = "_" + args.instance if args.instance else ""
+    api_token = env["PA_API_TOKEN" + suf]
+    user = env["PA_USER" + suf]
+    origin = "https://eu.pythonanywhere.com"
+    base = f"{origin}/api/v0/user/{user}/"
+    headers = {"Authorization": f"Token {api_token}"}
+
+    def request_json(url, *, data, method):
+        request = urllib.request.Request(url, headers=headers, method=method)
+        with urllib.request.urlopen(request, data=data) as resp:
+            return json.loads(resp.read())
+
+    def api_get(url):
+        return request_json(f"{base}{url}", data=None, method="GET")
+
+    def api_post(url, **kwargs):
+        if "json" in kwargs:
+            data_arg: Optional[bytes] = json.dumps(kwargs.pop("json")).encode("utf-8")
+        elif "data" in kwargs:
+            data_arg = urllib.parse.urlencode(kwargs.pop("data")).encode("utf-8")
+        else:
+            data_arg = None
+        if kwargs:
+            raise TypeError("unhandled kwargs %s" % ",".join(kwargs.keys()))
+        return request_json(f"{base}{url}", data=data_arg, method="POST")
+
+    def remove_csi_sequences(s: str) -> str:
+        return re.sub(r"\x1b\[[0-9]*(?:;[0-9]*){,15}\??[a-zA-Z@`]", "", s)
+
+    def get_latest_output(console):
+        console_id = console["id"]
+        output = api_get(f"/consoles/{console_id}/get_latest_output/")["output"]
+        output = remove_csi_sequences(output)
+        return output
+
+    def get_last_line(output):
+        return re.sub(r".*[\r\n]", "", output)
+
+    def open_new_bash_console():
+        console = api_post("/consoles/", data={"executable": "bash", "arguments": ""})
+        browser_url = f"{origin}{console['console_url']}"
+        webbrowser.open(browser_url)
+        input(
+            f"Press Return when you have initialized the bash console at {browser_url}"
+        )
+        return console
+
+    consoles = api_get("/consoles/")
+    assert isinstance(consoles, list)
+    bash_consoles = [
+        c for c in consoles if c["executable"] == "bash" and c["arguments"] == ""
+    ]
+    the_console = bash_consoles[0] if bash_consoles else None
+    if the_console is None:
+        the_console = open_new_bash_console()
+    browser_url = f"{origin}{the_console['console_url']}"
+    try:
+        initial_output = get_latest_output(the_console)
+    except urllib.error.HTTPError as exn:
+        if exn.code != 412:
+            raise
+        webbrowser.open(browser_url)
+        input(
+            f"Press Return when you have initialized the bash console at {browser_url}"
+        )
+        initial_output = get_latest_output(the_console)
+    last_line = get_last_line(initial_output)
+    if not last_line.endswith("$ "):
+        raise SystemExit(
+            f"You have an open bash console in an unknown state ({last_line[-50:]!r}). Please close it:\n{browser_url}"
+        )
+    console_id = the_console["id"]
+    print("%s running shell command %r" % (browser_url, actions))
+    actions += " #" + "".join(random.choice(string.ascii_letters) for _ in range(10))
+    marker = last_line + actions
+    assert marker not in initial_output
+    printed = 0
+    api_post(f"/consoles/{console_id}/send_input/", data={"input": f"{actions}\n"})
+    for _ in range(30):
+        s = get_latest_output(the_console)
+        last_line = get_last_line(s)
+        i = s.rindex(marker)
+        print_now = s[i + printed :].rpartition("\n")[0]
+        if not print_now:
+            print("(...waiting...)")
+        else:
+            print(print_now)
+            printed += len(print_now) + 1
+        if last_line.endswith("$ "):
+            print("Command finished")
+            break
+        time.sleep(1)
+    else:
+        print("Timeout - please check the output in your browser")
+
+
+if __name__ == "__main__":
+    main()
